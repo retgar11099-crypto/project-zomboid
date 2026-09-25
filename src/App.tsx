@@ -628,7 +628,7 @@ export default function App() {
               <span className="font-mono">{SERVER_IP}:{SERVER_PORT}</span>
               <span className="border-l border-[#0b0d09]/40 pl-3">{copied ? '✓ Готово' : 'Копировать IP'}</span>
             </button>
-            <a href="#top" className="border border-[var(--line)] px-7 py-4 font-cond text-base font-600 uppercase tracking-[0.15em] text-[var(--bone)] transition-colors hover:border-[var(--bone)] hover:bg-white/5">Discord сообщества</a>
+            <a href="https://discord.gg/tqhwNTZgf3" target="_blank" rel="noopener noreferrer" className="border border-[var(--line)] px-7 py-4 font-cond text-base font-600 uppercase tracking-[0.15em] text-[var(--bone)] transition-colors hover:border-[var(--bone)] hover:bg-white/5">Discord сообщества</a>
           </div>
         </div>
       </section>

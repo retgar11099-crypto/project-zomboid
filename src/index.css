@@ -1,0 +1,105 @@
+@import url('https://fonts.googleapis.com/css2?family=Anton&family=Oswald:wght@400;500;600;700&family=Barlow:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500;700&display=swap');
+@import 'tailwindcss';
+
+:root {
+  --bg: #0b0d09;
+  --bg-2: #12140d;
+  --panel: #16180f;
+  --panel-2: #1d2013;
+  --bone: #d9dcc6;
+  --bone-dim: #9aa088;
+  --hazard: #e8a13a;
+  --toxic: #a7c14a;
+  --blood: #8b2f24;
+  --rust: #6b4a2b;
+  --line: rgba(217, 220, 198, 0.12);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background-color: var(--bg);
+  color: var(--bone);
+  font-family: 'Barlow', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+::selection {
+  background: var(--hazard);
+  color: #16180f;
+}
+
+/* Hide scrollbars until scrolling */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+*:hover {
+  scrollbar-color: rgba(217, 220, 198, 0.25) transparent;
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 8px;
+}
+body:hover ::-webkit-scrollbar-thumb {
+  background: rgba(217, 220, 198, 0.22);
+}
+
+.font-display {
+  font-family: 'Anton', 'Oswald', sans-serif;
+  letter-spacing: 0.01em;
+}
+.font-cond {
+  font-family: 'Oswald', sans-serif;
+}
+.font-mono {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* Weathered paper / film grain overlay */
+.grain::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 60;
+  opacity: 0.06;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* Hazard warning tape */
+.hazard-tape {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    var(--hazard) 0,
+    var(--hazard) 22px,
+    #16180f 22px,
+    #16180f 44px
+  );
+}
+
+@keyframes flicker {
+  0%, 92%, 100% { opacity: 1; }
+  93% { opacity: 0.35; }
+  95% { opacity: 0.9; }
+  97% { opacity: 0.5; }
+}
+.flicker {
+  animation: flicker 5.5s infinite steps(1);
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(167, 193, 74, 0.55); }
+  50% { opacity: 0.6; box-shadow: 0 0 0 6px rgba(167, 193, 74, 0); }
+}
+.pulse-dot {
+  animation: pulse-dot 2.4s infinite ease-out;
+}

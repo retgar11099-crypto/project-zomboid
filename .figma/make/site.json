@@ -1,0 +1,11 @@
+{
+  "title": "Project Mantani",
+  "description": "Provides an engaging, visually appealing website for the Prodject Mantani server of Project Zomboid, enhancing player connection and community experience.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}

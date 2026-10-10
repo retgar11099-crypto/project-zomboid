@@ -2,6 +2,9 @@
   "title": "Project Mantani",
   "description": "Provides an engaging, visually appealing website for the Prodject Mantani server of Project Zomboid, enhancing player connection and community experience.",
   "language": "ru",
+  "icons": {
+    "icon": "favicon.svg"
+  },
   "robots": {
     "index": false
   },

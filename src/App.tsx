@@ -1,44 +1,45 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
-// ─── Constants ────────────────────────────────────────────────────────────────
-const SERVER_IP = 'play.mantani.gg'
-const SERVER_PORT = '16261'
-const LS_USERS = 'mantani_users'
-const LS_SESSION = 'mantani_session'
-const LS_NEWS = 'mantani_news'
-const LS_PROFILES = 'mantani_profiles'
+// ─── Supabase (общий проект с DSV-Zombi) ──────────────────────────────────────
+const SUPABASE_URL = 'https://tgleohmsmwqlvndxfykv.supabase.co'
+const SUPABASE_ANON_KEY = 'sb_publishable_vOM4373bRXKYAnUeEdTIDA_5gDXE98F'
+const EMAIL_DOMAIN = 'players.dsv-zombi.local'
+const ADMIN_NICK = 'Faranatic'
+
+const sb: any = typeof window !== 'undefined' ? (window as any).supabase?.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null
+const emailFor = (nick: string) => `${nick.toLowerCase()}@${EMAIL_DOMAIN}`
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-type User = { username: string; password: string; joinDate: string }
+type Me = { id: string; nick: string; role: string }
 type Profile = { avatar: string; bio: string }
-type NewsItem = { id: string; title: string; body: string; date: string; author: string; authorAvatar?: string }
+type Mechanic = { id: string; title: string; body: string; position: number }
+type NewsItem = { id: string; title: string; body: string; author: string; authorAvatar: string; createdAt: string }
+type EditorState = { kind: 'mechanics'; item: Mechanic | null } | { kind: 'news'; item: NewsItem | null }
 
-// ─── Storage ──────────────────────────────────────────────────────────────────
-const load = <T,>(key: string, fallback: T): T => {
-  try { return JSON.parse(localStorage.getItem(key) || 'null') ?? fallback } catch { return fallback }
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function isAdminOf(me: Me | null) {
+  return !!me && (me.role === 'founder' || me.role === 'admin' || me.nick.toLowerCase() === ADMIN_NICK.toLowerCase())
 }
-const save = (key: string, val: unknown) => localStorage.setItem(key, JSON.stringify(val))
+function roleLabel(role: string) {
+  return role === 'founder' ? 'Основатель' : role === 'admin' ? 'Админ' : 'Выживший'
+}
+function formatDate(iso: string) {
+  if (!iso) return ''
+  return new Date(iso).toLocaleDateString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', year: 'numeric' })
+}
 
-const loadUsers = (): User[] => load(LS_USERS, [])
-const saveUsers = (u: User[]) => save(LS_USERS, u)
-const loadSession = (): string | null => {
-  const username = localStorage.getItem(LS_SESSION)
-  if (username && loadUsers().some(user => user.username === username)) return username
-  localStorage.removeItem(LS_SESSION)
-  return null
+async function fetchMeById(id: string): Promise<Me | null> {
+  const { data } = await sb.from('profiles').select('id,nick,role').eq('id', id).maybeSingle()
+  return data ? { id: data.id, nick: data.nick, role: data.role } : null
 }
-const saveSession = (u: string | null) => u ? localStorage.setItem(LS_SESSION, u) : localStorage.removeItem(LS_SESSION)
-const loadNews = (): NewsItem[] => load(LS_NEWS, [])
-const loadProfiles = (): Record<string, Profile> => load(LS_PROFILES, {})
-const saveProfiles = (p: Record<string, Profile>) => save(LS_PROFILES, p)
 
-function getProfile(username: string): Profile {
-  return loadProfiles()[username] ?? { avatar: '', bio: '' }
-}
-function setProfile(username: string, p: Profile) {
-  const all = loadProfiles()
-  all[username] = p
-  saveProfiles(all)
+async function ensureProfile(userId: string, nick: string): Promise<Me | null> {
+  const existing = await fetchMeById(userId)
+  if (existing) return existing
+  const role = nick.toLowerCase() === ADMIN_NICK.toLowerCase() ? 'founder' : 'player'
+  const { error } = await sb.from('profiles').insert({ id: userId, nick, role })
+  if (error) return null
+  return { id: userId, nick, role }
 }
 
 // ─── Clocks ───────────────────────────────────────────────────────────────────
@@ -57,12 +58,6 @@ function useGameClock() {
 }
 
 // ─── Static data ──────────────────────────────────────────────────────────────
-const features = [
-  { tag: '01', title: 'Хардкорный лут', body: 'Экстремально редкие припасы, замедленный респавн, ускоренная эрозия. Каждая консерва — это решение остаться в живых или пойти дальше.' },
-  { tag: '02', title: 'Живая экономика', body: 'Торговые аванпосты игроков, валюта на крышках, чёрный рынок оружия. Репутация решает, откроют ли тебе ворота.' },
-  { tag: '03', title: 'Фракции и войны', body: 'Захват территорий, осады баз, дипломатия и предательство. Администрация не вмешивается — выживает сильнейший.' },
-  { tag: '04', title: 'Кастомная орда', body: 'Мигрирующие толпы, сирены, метеоусловия ломают маршруты. Спринтеры выходят только ночью. Спать хочется всем.' },
-]
 const mods = {
   Геймплей: [['Brita’s Armor & Weapons', 'Арсенал'], ['Superb Survivors', 'NPC-выжившие'], ['Fear the Rain', 'Кислотный дождь'], ['Expanded Helicopter Events', 'События']],
   Транспорт: [['Filibuster’s Vehicles', '40+ машин'], ['Autotsar Tankcrafting', 'Броневики'], ['Working Bicycles', 'Велосипеды'], ['Fuel Side Indicator', 'QoL']],
@@ -89,31 +84,41 @@ function Avatar({ src, username, size = 40, className = '' }: { src: string; use
 
 // ─── Auth modal ───────────────────────────────────────────────────────────────
 type AuthMode = 'login' | 'register'
-function AuthModal({ onClose, onAuth }: { onClose: () => void; onAuth: (u: string) => void }) {
+function AuthModal({ onClose, onAuth }: { onClose: () => void; onAuth: (me: Me) => void }) {
   const [mode, setMode] = useState<AuthMode>('login')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
   const overlayRef = useRef<HTMLDivElement>(null)
   useEffect(() => { document.body.style.overflow = 'hidden'; return () => { document.body.style.overflow = '' } }, [])
 
-  function submit(e: React.FormEvent) {
+  async function submit(e: React.FormEvent) {
     e.preventDefault(); setError('')
     const u = username.trim(); const p = password
     if (!u || !p) { setError('Заполни все поля'); return }
-    if (mode === 'login') {
-      const found = loadUsers().find(x => x.username.toLowerCase() === u.toLowerCase() && x.password === p)
-      if (!found) { setError('Неверный логин или пароль'); return }
-      onAuth(found.username)
-    } else {
-      if (u.length < 3) { setError('Логин минимум 3 символа'); return }
-      if (p.length < 6) { setError('Пароль минимум 6 символов'); return }
-      const users = loadUsers()
-      if (users.find(x => x.username.toLowerCase() === u.toLowerCase())) { setError('Логин уже занят'); return }
-      const joinDate = new Date().toLocaleDateString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', year: 'numeric' })
-      users.push({ username: u, password: p, joinDate })
-      saveUsers(users)
-      onAuth(u)
+    if (!sb) { setError('Сервис недоступен, попробуй позже'); return }
+    setBusy(true)
+    try {
+      if (mode === 'login') {
+        const { data, error: authError } = await sb.auth.signInWithPassword({ email: emailFor(u), password: p })
+        if (authError) { setError('Неверный логин или пароль'); return }
+        const me = await ensureProfile(data.user.id, u)
+        if (!me) { setError('Не удалось загрузить профиль'); return }
+        onAuth(me)
+      } else {
+        if (u.length < 3) { setError('Логин минимум 3 символа'); return }
+        if (!/^[A-Za-z0-9_]{3,16}$/.test(u)) { setError('Логин: латиница, цифры и _ (3–16 символов)'); return }
+        if (p.length < 6) { setError('Пароль минимум 6 символов'); return }
+        const { data, error: authError } = await sb.auth.signUp({ email: emailFor(u), password: p })
+        if (authError) { setError(/already|registered|exists/i.test(authError.message) ? 'Логин уже занят' : 'Ошибка регистрации'); return }
+        if (!data?.user) { setError('Не удалось создать аккаунт'); return }
+        const me = await ensureProfile(data.user.id, u)
+        if (!me) { setError('Не удалось создать профиль'); return }
+        onAuth(me)
+      }
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -139,8 +144,8 @@ function AuthModal({ onClose, onAuth }: { onClose: () => void; onAuth: (u: strin
             <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Пароль" autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
               className="w-full border border-[var(--line)] bg-[#12140d] px-4 py-3 font-mono text-sm text-[var(--bone)] placeholder-[var(--bone-dim)] outline-none focus:border-[var(--hazard)]" />
             {error && <p className="font-mono text-[11px] text-[var(--rust)]">⚠ {error}</p>}
-            <button type="submit" className="w-full border border-[var(--hazard)] bg-[var(--hazard)] py-3 font-cond text-sm font-700 uppercase tracking-[0.2em] text-[#0b0d09] transition-colors hover:bg-[#f2b452]">
-              {mode === 'login' ? 'Войти в сектор' : 'Создать профиль'}
+            <button type="submit" disabled={busy} className="w-full border border-[var(--hazard)] bg-[var(--hazard)] py-3 font-cond text-sm font-700 uppercase tracking-[0.2em] text-[#0b0d09] transition-colors hover:bg-[#f2b452] disabled:opacity-50">
+              {busy ? '...' : mode === 'login' ? 'Войти в сектор' : 'Создать профиль'}
             </button>
           </form>
         </div>
@@ -152,30 +157,43 @@ function AuthModal({ onClose, onAuth }: { onClose: () => void; onAuth: (u: strin
 // ─── Profile modal ────────────────────────────────────────────────────────────
 type ProfileTab = 'info' | 'avatar' | 'password'
 
-function ProfileModal({ username, onClose, onLogout, onProfileChange }: {
-  username: string; onClose: () => void; onLogout: () => void; onProfileChange: () => void
+function ProfileModal({ me, onClose, onLogout, onProfileChange }: {
+  me: Me; onClose: () => void; onLogout: () => void; onProfileChange: () => void
 }) {
   const [tab, setTab] = useState<ProfileTab>('info')
-  const [profile, setProfileState] = useState<Profile>(() => getProfile(username))
+  const [profile, setProfileState] = useState<Profile>({ avatar: '', bio: '' })
+  const [bio, setBio] = useState('')
+  const [joinDate, setJoinDate] = useState('—')
   const overlayRef = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
-  // join date
-  const joinDate = loadUsers().find(u => u.username === username)?.joinDate ?? '—'
+  useEffect(() => {
+    let active = true
+    ;(async () => {
+      if (!sb) return
+      const p = await sb.from('mantani_profiles').select('avatar,bio').eq('id', me.id).maybeSingle()
+      if (active && p.data) {
+        const loaded = { avatar: p.data.avatar ?? '', bio: p.data.bio ?? '' }
+        setProfileState(loaded); setBio(loaded.bio)
+      }
+      const prof = await sb.from('profiles').select('created_at').eq('id', me.id).maybeSingle()
+      if (active && prof.data?.created_at) setJoinDate(formatDate(prof.data.created_at))
+    })()
+    return () => { active = false }
+  }, [me.id])
 
   useEffect(() => { document.body.style.overflow = 'hidden'; return () => { document.body.style.overflow = '' } }, [])
 
-  function saveProfileChange(p: Profile) {
+  async function persistProfile(p: Profile) {
     setProfileState(p)
-    setProfile(username, p)
+    if (sb) await sb.from('mantani_profiles').upsert({ id: me.id, avatar: p.avatar, bio: p.bio, updated_at: new Date().toISOString() })
     onProfileChange()
   }
 
   // ── Bio form
-  const [bio, setBio] = useState(profile.bio)
   const [bioSaved, setBioSaved] = useState(false)
-  function saveBio() {
-    saveProfileChange({ ...profile, bio })
+  async function saveBio() {
+    await persistProfile({ ...profile, bio })
     setBioSaved(true)
     setTimeout(() => setBioSaved(false), 1800)
   }
@@ -189,13 +207,10 @@ function ProfileModal({ username, onClose, onLogout, onProfileChange }: {
     if (file.size > 2 * 1024 * 1024) { setAvatarError('Файл слишком большой (макс. 2 МБ)'); return }
     if (!file.type.startsWith('image/')) { setAvatarError('Только изображения'); return }
     const reader = new FileReader()
-    reader.onload = ev => {
-      const result = ev.target?.result as string
-      saveProfileChange({ ...profile, avatar: result })
-    }
+    reader.onload = ev => { persistProfile({ ...profile, avatar: ev.target?.result as string }) }
     reader.readAsDataURL(file)
   }
-  function removeAvatar() { saveProfileChange({ ...profile, avatar: '' }) }
+  function removeAvatar() { persistProfile({ ...profile, avatar: '' }) }
 
   // ── Password
   const [oldPass, setOldPass] = useState('')
@@ -203,15 +218,15 @@ function ProfileModal({ username, onClose, onLogout, onProfileChange }: {
   const [confirmPass, setConfirmPass] = useState('')
   const [passError, setPassError] = useState('')
   const [passSaved, setPassSaved] = useState(false)
-  function changePassword(e: React.FormEvent) {
+  async function changePassword(e: React.FormEvent) {
     e.preventDefault(); setPassError('')
     if (newPass.length < 6) { setPassError('Новый пароль минимум 6 символов'); return }
     if (newPass !== confirmPass) { setPassError('Пароли не совпадают'); return }
-    const users = loadUsers()
-    const idx = users.findIndex(u => u.username === username)
-    if (idx === -1 || users[idx].password !== oldPass) { setPassError('Неверный текущий пароль'); return }
-    users[idx].password = newPass
-    saveUsers(users)
+    if (!sb) return
+    const { error: signError } = await sb.auth.signInWithPassword({ email: emailFor(me.nick), password: oldPass })
+    if (signError) { setPassError('Неверный текущий пароль'); return }
+    const { error } = await sb.auth.updateUser({ password: newPass })
+    if (error) { setPassError('Не удалось изменить пароль'); return }
     setOldPass(''); setNewPass(''); setConfirmPass('')
     setPassSaved(true)
     setTimeout(() => setPassSaved(false), 2000)
@@ -230,10 +245,10 @@ function ProfileModal({ username, onClose, onLogout, onProfileChange }: {
 
         {/* Header */}
         <div className="flex items-center gap-4 border-b border-[var(--line)] px-6 py-5">
-          <Avatar src={profile.avatar} username={username} size={52} className="border border-[var(--line)]" />
+          <Avatar src={profile.avatar} username={me.nick} size={52} className="border border-[var(--line)]" />
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
-              <span className="font-display text-xl uppercase text-[var(--bone)]">{username}</span>
+              <span className="font-display text-xl uppercase text-[var(--bone)]">{me.nick}</span>
             </div>
             <div className="mt-0.5 font-mono text-[10px] uppercase tracking-[0.15em] text-[var(--bone-dim)]">
               Присоединился: {joinDate}
@@ -257,7 +272,7 @@ function ProfileModal({ username, onClose, onLogout, onProfileChange }: {
           <div className="p-6 space-y-5">
             <div>
               <label className="mb-2 block font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--bone-dim)]">Логин</label>
-              <div className="border border-[var(--line)] bg-[#12140d] px-4 py-3 font-mono text-sm text-[var(--bone-dim)]">{username}</div>
+              <div className="border border-[var(--line)] bg-[#12140d] px-4 py-3 font-mono text-sm text-[var(--bone-dim)]">{me.nick}</div>
             </div>
             <div>
               <label className="mb-2 block font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--bone-dim)]">Статус / О себе</label>
@@ -273,7 +288,7 @@ function ProfileModal({ username, onClose, onLogout, onProfileChange }: {
               <div className="grid grid-cols-2 gap-px border border-[var(--line)] bg-[var(--line)]">
                 <div className="bg-[#12140d] p-4">
                   <div className="font-mono text-[10px] uppercase tracking-[0.15em] text-[var(--bone-dim)]">Роль</div>
-                  <div className="mt-1 font-cond text-sm text-[var(--bone)]">Выживший</div>
+                  <div className="mt-1 font-cond text-sm text-[var(--bone)]">{roleLabel(me.role)}</div>
                 </div>
                 <div className="bg-[#12140d] p-4">
                   <div className="font-mono text-[10px] uppercase tracking-[0.15em] text-[var(--bone-dim)]">Дата вступления</div>
@@ -295,7 +310,7 @@ function ProfileModal({ username, onClose, onLogout, onProfileChange }: {
           <div className="p-6 space-y-6">
             <div className="flex flex-col items-center gap-5">
               <div className="relative">
-                <Avatar src={profile.avatar} username={username} size={120} className="border-2 border-[var(--line)]" />
+                <Avatar src={profile.avatar} username={me.nick} size={120} className="border-2 border-[var(--line)]" />
                 {profile.avatar && (
                   <button onClick={removeAvatar}
                     className="absolute -top-2 -right-2 grid h-6 w-6 place-items-center border border-[var(--rust)] bg-[#0e100b] font-mono text-xs text-[var(--rust)] hover:bg-[var(--rust)] hover:text-[var(--bone)] transition-colors">
@@ -378,9 +393,61 @@ function ProfileModal({ username, onClose, onLogout, onProfileChange }: {
   )
 }
 
+// ─── Content editor (механики / новости) ──────────────────────────────────────
+function ContentEditor({ heading, initialTitle = '', initialBody = '', canDelete, onClose, onSubmit, onDelete }: {
+  heading: string; initialTitle?: string; initialBody?: string; canDelete: boolean
+  onClose: () => void; onSubmit: (title: string, body: string) => Promise<void>; onDelete: () => Promise<void>
+}) {
+  const [title, setTitle] = useState(initialTitle)
+  const [body, setBody] = useState(initialBody)
+  const [busy, setBusy] = useState(false)
+  const overlayRef = useRef<HTMLDivElement>(null)
+  useEffect(() => { document.body.style.overflow = 'hidden'; return () => { document.body.style.overflow = '' } }, [])
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!title.trim() || !body.trim()) return
+    setBusy(true)
+    try { await onSubmit(title.trim(), body.trim()) } finally { setBusy(false) }
+  }
+  async function handleDelete() {
+    setBusy(true)
+    try { await onDelete() } finally { setBusy(false) }
+  }
+
+  return (
+    <div ref={overlayRef} className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 backdrop-blur-sm p-4" onClick={e => { if (e.target === overlayRef.current) onClose() }}>
+      <div className="w-full max-w-lg border border-[var(--line)] bg-[#0e100b]">
+        <div className="hazard-tape h-1.5 w-full" />
+        <div className="p-6">
+          <div className="mb-5 flex items-center justify-between">
+            <span className="font-mono text-[10px] uppercase tracking-[0.3em] text-[var(--bone-dim)]">{heading}</span>
+            <button onClick={onClose} className="font-mono text-lg text-[var(--bone-dim)] hover:text-[var(--bone)]">×</button>
+          </div>
+          <form onSubmit={handleSubmit} className="space-y-3">
+            <input value={title} onChange={e => setTitle(e.target.value)} placeholder="Заголовок"
+              className="w-full border border-[var(--line)] bg-[#12140d] px-4 py-3 font-mono text-sm text-[var(--bone)] placeholder-[var(--bone-dim)] outline-none focus:border-[var(--hazard)]" />
+            <textarea value={body} onChange={e => setBody(e.target.value)} placeholder="Текст" rows={5}
+              className="w-full resize-none border border-[var(--line)] bg-[#12140d] px-4 py-3 font-cond text-sm leading-relaxed text-[var(--bone)] placeholder-[var(--bone-dim)] outline-none focus:border-[var(--hazard)]" />
+            <button type="submit" disabled={busy}
+              className="w-full border border-[var(--hazard)] bg-[var(--hazard)] py-3 font-cond text-sm font-700 uppercase tracking-[0.2em] text-[#0b0d09] transition-colors hover:bg-[#f2b452] disabled:opacity-50">
+              {busy ? '...' : 'Сохранить'}
+            </button>
+            {canDelete && (
+              <button type="button" onClick={handleDelete} disabled={busy}
+                className="w-full border border-[var(--rust)] py-2.5 font-cond text-xs font-600 uppercase tracking-[0.2em] text-[var(--rust)] transition-colors hover:bg-[var(--rust)] hover:text-[var(--bone)] disabled:opacity-50">
+                Удалить
+              </button>
+            )}
+          </form>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Main App ─────────────────────────────────────────────────────────────────
 export default function App() {
-  const [copied, setCopied] = useState(false)
   const [activeMod, setActiveMod] = useState<keyof typeof mods>('Геймплей')
   const [openRule, setOpenRule] = useState<number | null>(0)
 
@@ -389,32 +456,102 @@ export default function App() {
   const gameTime = useGameClock()
   const displayTime = clockMode === 'msk' ? mskTime : gameTime
 
-  const [currentUser, setCurrentUser] = useState<string | null>(() => loadSession())
+  const [me, setMe] = useState<Me | null>(null)
+  const [myAvatar, setMyAvatar] = useState('')
   const [showAuth, setShowAuth] = useState(false)
   const [showProfile, setShowProfile] = useState(false)
   const [profileVersion, setProfileVersion] = useState(0)
 
-  const currentProfile = currentUser ? getProfile(currentUser) : null
+  const [mechanics, setMechanics] = useState<Mechanic[]>([])
+  const [news, setNews] = useState<NewsItem[]>([])
+  const [editor, setEditor] = useState<EditorState | null>(null)
 
-  const [news] = useState<NewsItem[]>(() => loadNews())
+  const isAdmin = isAdminOf(me)
 
-  function handleAuth(u: string) { saveSession(u); setCurrentUser(u); setShowAuth(false) }
-  function handleLogout() { saveSession(null); setCurrentUser(null) }
+  // ── Session
+  useEffect(() => {
+    if (!sb) return
+    let active = true
+    sb.auth.getSession().then(async ({ data }: any) => {
+      if (!active || !data.session?.user) return
+      const m = await fetchMeById(data.session.user.id)
+      if (active) setMe(m)
+    })
+    const { data: sub } = sb.auth.onAuthStateChange((_event: string, session: any) => {
+      if (!session?.user) { setMe(null); return }
+      fetchMeById(session.user.id).then((m: Me | null) => setMe(m))
+    })
+    return () => { active = false; sub.subscription.unsubscribe() }
+  }, [])
 
-  const copyIp = () => {
-    navigator.clipboard?.writeText(`${SERVER_IP}:${SERVER_PORT}`).catch(() => {})
-    setCopied(true); setTimeout(() => setCopied(false), 1800)
+  // ── Мой аватар (для новостей и навбара)
+  useEffect(() => {
+    if (!sb || !me) { setMyAvatar(''); return }
+    sb.from('mantani_profiles').select('avatar').eq('id', me.id).maybeSingle()
+      .then((r: any) => setMyAvatar(r.data?.avatar ?? ''))
+  }, [me, profileVersion])
+
+  // ── Контент
+  const loadContent = useCallback(async () => {
+    if (!sb) return
+    const m = await sb.from('mantani_mechanics').select('id,title,body,position').order('position', { ascending: true })
+    if (!m.error && m.data) setMechanics(m.data as Mechanic[])
+    const n = await sb.from('mantani_news').select('id,title,body,author,author_avatar,created_at').order('created_at', { ascending: false })
+    if (!n.error && n.data) setNews(n.data.map((r: any) => ({ id: r.id, title: r.title, body: r.body, author: r.author ?? '', authorAvatar: r.author_avatar ?? '', createdAt: r.created_at ?? '' })))
+  }, [])
+
+  useEffect(() => { loadContent() }, [loadContent])
+
+  async function handleLogout() {
+    if (sb) await sb.auth.signOut()
+    setMe(null)
+  }
+
+  async function submitEditor(title: string, body: string) {
+    if (!sb || !editor) return
+    if (editor.kind === 'mechanics') {
+      if (editor.item) await sb.from('mantani_mechanics').update({ title, body }).eq('id', editor.item.id)
+      else await sb.from('mantani_mechanics').insert({ title, body, position: mechanics.length })
+    } else {
+      if (editor.item) await sb.from('mantani_news').update({ title, body }).eq('id', editor.item.id)
+      else await sb.from('mantani_news').insert({ title, body, author: me?.nick ?? 'Администрация', author_avatar: myAvatar })
+    }
+    setEditor(null)
+    await loadContent()
+  }
+
+  async function removeItem(kind: 'mechanics' | 'news', id: string) {
+    if (!sb) return
+    await sb.from(kind === 'mechanics' ? 'mantani_mechanics' : 'mantani_news').delete().eq('id', id)
+    await loadContent()
+  }
+
+  async function deleteEditor() {
+    if (!editor || !editor.item) return
+    await removeItem(editor.kind, editor.item.id)
+    setEditor(null)
   }
 
   return (
     <div className="grain relative min-h-screen">
-      {showAuth && <AuthModal onClose={() => setShowAuth(false)} onAuth={handleAuth} />}
-      {showProfile && currentUser && (
+      {showAuth && <AuthModal onClose={() => setShowAuth(false)} onAuth={m => { setMe(m); setShowAuth(false) }} />}
+      {showProfile && me && (
         <ProfileModal
-          username={currentUser}
+          me={me}
           onClose={() => setShowProfile(false)}
           onLogout={handleLogout}
           onProfileChange={() => setProfileVersion(v => v + 1)}
+        />
+      )}
+      {editor && (
+        <ContentEditor
+          heading={editor.kind === 'mechanics' ? '// механика' : '// новость'}
+          initialTitle={editor.item?.title ?? ''}
+          initialBody={editor.item?.body ?? ''}
+          canDelete={!!editor.item}
+          onClose={() => setEditor(null)}
+          onSubmit={submitEditor}
+          onDelete={deleteEditor}
         />
       )}
 
@@ -433,11 +570,11 @@ export default function App() {
             ))}
           </nav>
           <div className="flex items-center gap-3">
-            {currentUser ? (
+            {me ? (
               <button key={profileVersion} onClick={() => setShowProfile(true)} className="flex items-center gap-2 border border-[var(--line)] py-1.5 pl-1.5 pr-3 transition-colors hover:border-[var(--hazard)]">
-                <Avatar src={currentProfile?.avatar ?? ''} username={currentUser} size={28} className="border border-[var(--line)]" />
+                <Avatar src={myAvatar} username={me.nick} size={28} className="border border-[var(--line)]" />
                 <span className="font-cond text-xs font-600 uppercase tracking-[0.1em] text-[var(--bone)]">
-                  {currentUser}
+                  {me.nick}
                 </span>
               </button>
             ) : (
@@ -465,11 +602,8 @@ export default function App() {
             Хардкорный выделенный сервер по <span className="text-[var(--bone)]">Project Zomboid</span>. Ты проснулся один. Найди своих — или стань кормом для орды.
           </p>
           <div className="mt-8 flex flex-wrap items-center gap-4">
-            <button onClick={copyIp} className="flex items-center gap-3 border border-[var(--hazard)] bg-[var(--hazard)] px-6 py-3 font-cond text-sm font-700 uppercase tracking-[0.15em] text-[#0b0d09] transition-all hover:bg-[#f2b452]">
-              <span className="font-mono">{SERVER_IP}:{SERVER_PORT}</span>
-              <span className="border-l border-[#0b0d09]/40 pl-3">{copied ? 'Скопировано' : 'Копировать'}</span>
-            </button>
-            <a href="#join" className="border border-[var(--line)] px-6 py-3 font-cond text-sm font-600 uppercase tracking-[0.15em] text-[var(--bone)] transition-colors hover:border-[var(--bone)] hover:bg-white/5">Как зайти →</a>
+            <a href="#join" className="border border-[var(--hazard)] bg-[var(--hazard)] px-6 py-3 font-cond text-sm font-700 uppercase tracking-[0.15em] text-[#0b0d09] transition-colors hover:bg-[#f2b452]">Как зайти →</a>
+            <a href="https://discord.gg/tqhwNTZgf3" target="_blank" rel="noopener noreferrer" className="border border-[var(--line)] px-6 py-3 font-cond text-sm font-600 uppercase tracking-[0.15em] text-[var(--bone)] transition-colors hover:border-[var(--bone)] hover:bg-white/5">Discord</a>
           </div>
           <div className="mt-10 inline-flex items-stretch border border-[var(--line)] bg-[#12140d]/80">
             <div className="flex items-center gap-3 px-5 py-3">
@@ -508,17 +642,35 @@ export default function App() {
         </div>
       </section>
 
-      {/* ── FEATURES ── */}
+      {/* ── FEATURES / МЕХАНИКИ ── */}
       <section id="features" className="border-t border-[var(--line)] bg-[#0e100b]">
         <div className="mx-auto max-w-6xl px-5 py-24">
-          <SectionLabel n="01">Механики выживания</SectionLabel>
+          <div className="flex flex-wrap items-end justify-between gap-6">
+            <SectionLabel n="01">Механики выживания</SectionLabel>
+            {isAdmin && (
+              <button onClick={() => setEditor({ kind: 'mechanics', item: null })}
+                className="border border-[var(--hazard)] bg-[var(--hazard)] px-4 py-2 font-cond text-xs font-700 uppercase tracking-[0.2em] text-[#0b0d09] transition-colors hover:bg-[#f2b452]">
+                + Добавить
+              </button>
+            )}
+          </div>
           <div className="mt-10 grid gap-px border border-[var(--line)] bg-[var(--line)] sm:grid-cols-2">
-            {features.map(f => (
-              <article key={f.tag} className="group relative bg-[#12140d] p-8 transition-colors hover:bg-[#16180f]">
-                <span className="font-mono text-xs text-[var(--rust)]">{f.tag}</span>
+            {mechanics.length === 0 ? (
+              <div className="border border-dashed border-[var(--line)] bg-[#0e100b] p-10 text-center sm:col-span-2">
+                <p className="font-mono text-[11px] uppercase tracking-[0.25em] text-[var(--bone-dim)]">// пока ничего нет</p>
+              </div>
+            ) : mechanics.map((f, i) => (
+              <article key={f.id} className="group relative bg-[#12140d] p-8 transition-colors hover:bg-[#16180f]">
+                <span className="font-mono text-xs text-[var(--rust)]">{String(i + 1).padStart(2, '0')}</span>
                 <div className="mt-3 h-px w-10 bg-[var(--hazard)] transition-all group-hover:w-20" />
                 <h3 className="mt-5 font-display text-2xl uppercase text-[var(--bone)]">{f.title}</h3>
                 <p className="mt-3 font-cond text-[15px] leading-relaxed text-[var(--bone-dim)]">{f.body}</p>
+                {isAdmin && (
+                  <div className="mt-4 flex gap-2">
+                    <button onClick={() => setEditor({ kind: 'mechanics', item: f })} className="border border-[var(--line)] px-3 py-1 font-mono text-[10px] uppercase tracking-[0.15em] text-[var(--bone-dim)] transition-colors hover:border-[var(--hazard)] hover:text-[var(--hazard)]">Изменить</button>
+                    <button onClick={() => removeItem('mechanics', f.id)} className="border border-[var(--line)] px-3 py-1 font-mono text-[10px] uppercase tracking-[0.15em] text-[var(--bone-dim)] transition-colors hover:border-[var(--rust)] hover:text-[var(--rust)]">Удалить</button>
+                  </div>
+                )}
               </article>
             ))}
           </div>
@@ -574,13 +726,18 @@ export default function App() {
         </div>
       </section>
 
-      {/* ── NEWS ── */}
+      {/* ── NEWS / НОВОСТИ ── */}
       <section id="news" className="mx-auto max-w-6xl px-5 py-24">
-        <SectionLabel n="04">Сводка выживших</SectionLabel>
-        <div className="mt-6 flex flex-wrap items-end justify-between gap-4">
-          <h2 className="font-display text-[clamp(2rem,5vw,3.5rem)] uppercase leading-[0.9] text-[var(--bone)]">Новости сектора</h2>
-          {!currentUser && (
-            <button onClick={() => setShowAuth(true)} className="font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--bone-dim)] underline underline-offset-4 hover:text-[var(--hazard)]">Войди, чтобы читать</button>
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <SectionLabel n="04">Сводка выживших</SectionLabel>
+            <h2 className="mt-4 font-display text-[clamp(2rem,5vw,3.5rem)] uppercase leading-[0.9] text-[var(--bone)]">Новости сектора</h2>
+          </div>
+          {isAdmin && (
+            <button onClick={() => setEditor({ kind: 'news', item: null })}
+              className="border border-[var(--hazard)] bg-[var(--hazard)] px-4 py-2 font-cond text-xs font-700 uppercase tracking-[0.2em] text-[#0b0d09] transition-colors hover:bg-[#f2b452]">
+              + Добавить
+            </button>
           )}
         </div>
 
@@ -594,14 +751,19 @@ export default function App() {
               <div className="flex items-start justify-between gap-4">
                 <div className="flex-1">
                   <div className="mb-3 flex flex-wrap items-center gap-3">
-                    <Avatar src={item.authorAvatar ?? ''} username={item.author} size={24} className="border border-[var(--line)]" />
+                    <Avatar src={item.authorAvatar} username={item.author} size={24} className="border border-[var(--line)]" />
                     <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--hazard)]">★ {item.author}</span>
-                    <span className="font-mono text-[10px] uppercase tracking-[0.15em] text-[var(--bone-dim)]">{item.date}</span>
+                    <span className="font-mono text-[10px] uppercase tracking-[0.15em] text-[var(--bone-dim)]">{formatDate(item.createdAt)}</span>
                   </div>
                   <h3 className="font-display text-xl uppercase text-[var(--bone)]">{item.title}</h3>
-                  <p className="mt-3 font-cond text-[15px] leading-relaxed text-[var(--bone-dim)]">{item.body}</p>
+                  <p className="mt-3 whitespace-pre-line font-cond text-[15px] leading-relaxed text-[var(--bone-dim)]">{item.body}</p>
                 </div>
-
+                {isAdmin && (
+                  <div className="flex shrink-0 flex-col gap-2">
+                    <button onClick={() => setEditor({ kind: 'news', item })} className="border border-[var(--line)] px-3 py-1 font-mono text-[10px] uppercase tracking-[0.15em] text-[var(--bone-dim)] transition-colors hover:border-[var(--hazard)] hover:text-[var(--hazard)]">Изменить</button>
+                    <button onClick={() => removeItem('news', item.id)} className="border border-[var(--line)] px-3 py-1 font-mono text-[10px] uppercase tracking-[0.15em] text-[var(--bone-dim)] transition-colors hover:border-[var(--rust)] hover:text-[var(--rust)]">Удалить</button>
+                  </div>
+                )}
               </div>
             </article>
           ))}
@@ -615,7 +777,7 @@ export default function App() {
           <SectionLabel n="05" center>Развёртывание</SectionLabel>
           <h2 className="mt-5 font-display text-[clamp(2.5rem,7vw,5.5rem)] uppercase leading-[0.85] text-[var(--bone)]">Готов проснуться<br /><span className="text-[var(--hazard)]">в Ноксвилле?</span></h2>
           <ol className="mx-auto mt-12 grid max-w-2xl gap-px border border-[var(--line)] bg-[var(--line)] text-left sm:grid-cols-3">
-            {[['Подпишись', 'на коллекцию модов в Steam Workshop'], ['Открой PZ', 'вкладка «Join» → «Favorites» → добавь IP'], ['Выживай', 'создай персонажа и не умри в первый день']].map(([t, d], i) => (
+            {[['Подпишись', 'на коллекцию модов в Steam Workshop'], ['Открой PZ', 'вкладка «Join» → добавь сервер в Favorites'], ['Выживай', 'создай персонажа и не умри в первый день']].map(([t, d], i) => (
               <li key={t} className="bg-[#12140d] p-5">
                 <div className="font-display text-3xl text-[var(--hazard)]">0{i + 1}</div>
                 <div className="mt-2 font-cond text-base uppercase tracking-wide text-[var(--bone)]">{t}</div>
@@ -624,11 +786,7 @@ export default function App() {
             ))}
           </ol>
           <div className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
-            <button onClick={copyIp} className="flex items-center gap-3 border border-[var(--hazard)] bg-[var(--hazard)] px-7 py-4 font-cond text-base font-700 uppercase tracking-[0.15em] text-[#0b0d09] transition-all hover:bg-[#f2b452]">
-              <span className="font-mono">{SERVER_IP}:{SERVER_PORT}</span>
-              <span className="border-l border-[#0b0d09]/40 pl-3">{copied ? '✓ Готово' : 'Копировать IP'}</span>
-            </button>
-            <a href="https://discord.gg/tqhwNTZgf3" target="_blank" rel="noopener noreferrer" className="border border-[var(--line)] px-7 py-4 font-cond text-base font-600 uppercase tracking-[0.15em] text-[var(--bone)] transition-colors hover:border-[var(--bone)] hover:bg-white/5">Discord сообщества</a>
+            <a href="https://discord.gg/tqhwNTZgf3" target="_blank" rel="noopener noreferrer" className="border border-[var(--hazard)] bg-[var(--hazard)] px-7 py-4 font-cond text-base font-700 uppercase tracking-[0.15em] text-[#0b0d09] transition-colors hover:bg-[#f2b452]">Discord сообщества</a>
           </div>
         </div>
       </section>

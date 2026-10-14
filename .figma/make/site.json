@@ -13,6 +13,6 @@
     "ignoreReducedMotion": false
   },
   "customScripts": {
-    "headEnd": "<script src=\"https://protocold7.ru/network-bar.js\" defer></script>"
+    "headEnd": "<script src=\"https://protocold7.ru/network-bar.js?v=2\" defer></script>"
   }
 }

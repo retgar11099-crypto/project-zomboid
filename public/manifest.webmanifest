@@ -1,0 +1,16 @@
+{
+  "name": "Project Mantani",
+  "short_name": "Mantani",
+  "description": "Сайт сервера Project Zomboid — Project Mantani.",
+  "lang": "ru",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#12160f",
+  "theme_color": "#12160f",
+  "icons": [
+    { "src": "favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}
